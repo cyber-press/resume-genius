@@ -1,32 +1,36 @@
 const express = require("express");
 const cors = require("cors");
 const rateLimit = require("express-rate-limit");
+const { Anthropic } = require("@anthropic-ai/sdk");
 
 const app = express();
+const PORT = process.env.PORT || 3000;
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const MODEL = "claude-sonnet-4-6";
-const MAX_TOKENS_CAP = 1200;
+const MODEL = "claude-3-5-sonnet-20241022";
 
 if (!ANTHROPIC_API_KEY) {
-  console.error("Missing ANTHROPIC_API_KEY environment variable. Set it in your Render service settings.");
+  console.error("Missing ANTHROPIC_API_KEY environment variable. Set it at your Render service settings.");
 }
 
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 
-// A full Resume Genius run is roughly 10-14 API calls (extraction, per-skill
-// research, ranking, per-skill leads, proposal). This allows a couple of
-// full runs plus retries per IP in a 15-minute window without opening the
-// door to bulk automated abuse.
+// Friendly home route so clicking your Render link shows a success message instead of "Cannot GET /"
+app.get("/", (req, res) => {
+  res.status(200).send("Resume Genius API Proxy Server is Online.");
+});
+
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 60,
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 60, // Limit each IP to 60 requests per window
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: "Too many requests right now. Please wait a few minutes and try again." },
+  message: { error: "Too many requests right now. Please wait a few minutes and try again." }
 });
+
 app.use("/api/", limiter);
+
 
 app.get("/health", (req, res) => {
   res.json({ ok: true });
