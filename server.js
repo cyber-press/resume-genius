@@ -1,50 +1,46 @@
 const express = require("express");
 const cors = require("cors");
 const rateLimit = require("express-rate-limit");
-const { Anthropic } = require("@anthropic-ai/sdk");
+const Anthropic = require("@anthropic-ai/sdk");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+
+// Render sits behind a reverse proxy that sets X-Forwarded-For. Without this,
+// express-rate-limit can't safely determine real client IPs and refuses to
+// start rate limiting (ERR_ERL_UNEXPECTED_X_FORWARDED_FOR).
+app.set("trust proxy", 1);
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const MODEL = "claude-3-5-sonnet-20241022";
+const MODEL = "claude-sonnet-5";
 const MAX_TOKENS_CAP = 1200;
 
 if (!ANTHROPIC_API_KEY) {
   console.error("Missing ANTHROPIC_API_KEY environment variable. Set it in your Render service settings.");
 }
 
-// Initialize Anthropic Client safely
-const anthropic = new Anthropic({
-  apiKey: ANTHROPIC_API_KEY || "dummy_placeholder_key_to_prevent_init_crash",
-});
+const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 
-// Friendly home route so clicking your Render link shows a success message
-app.get("/", (req, res) => {
-  res.status(200).send("Resume Genius API Proxy Server is Online.");
+// A full Resume Genius run is roughly 10-14 API calls (extraction, per-skill
+// research, ranking, per-skill leads, proposal). This allows a couple of
+// full runs plus retries per IP in a 15-minute window without opening the
+// door to bulk automated abuse.
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests right now. Please wait a few minutes and try again." },
 });
+app.use("/api/", limiter);
 
-// Health check endpoint
 app.get("/health", (req, res) => {
   res.json({ ok: true });
 });
 
-// Global Rate Limiter: Allows a couple of full runs plus retries per IP in a 15-minute window
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 60, // Limit each IP to 60 requests per window
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: "Too many requests right now. Please wait a few minutes and try again." }
-});
-
-app.use("/api/", limiter);
-
-// The Core API Proxy Post Handler
-app.post("/api/analyze", async (req, res) => {
+app.post("/api/messages", async (req, res) => {
   try {
     if (!ANTHROPIC_API_KEY) {
       return res.status(500).json({ error: "Server is not configured with an API key." });
@@ -55,35 +51,32 @@ app.post("/api/analyze", async (req, res) => {
       return res.status(400).json({ error: "Request must include a non-empty messages array." });
     }
 
-    // Filter tools payload if required (ensures security guardrails)
-    let activeTools = tools;
-    if (Array.isArray(tools) && tools.length > 0) {
-      // If filtering is preferred to restrict tools usage, handle it cleanly here:
-      activeTools = tools.filter((t) => t && t.name === "web_search");
-    }
-
-    // Call the official Anthropic SDK safely using our configuration constants
-    const response = await anthropic.messages.create({
+    const requestBody = {
       model: MODEL,
       max_tokens: MAX_TOKENS_CAP,
-      messages: messages,
-      ...(activeTools && activeTools.length > 0 && { tools: activeTools })
-    });
+      messages,
+    };
 
-    // Extract text responses out cleanly for the frontend application wrapper
-    const text = response.content
-      .filter((b) => b.type === "text")
-      .map((b) => b.text)
-      .join("\n")
-      .trim();
+    if (Array.isArray(tools) && tools.length > 0) {
+      // Only allow the web_search tool through the proxy - nothing else.
+      const allowedTools = tools.filter((t) => t && t.name === "web_search");
+      if (allowedTools.length > 0) requestBody.tools = allowedTools;
+    }
 
-    return res.status(200).json({ text });
-  } catch (error) {
-    console.error('Render Proxy Error:', error);
-    return res.status(500).json({ error: 'Failed to process request with Claude.' });
+    const message = await anthropic.messages.create(requestBody);
+    res.status(200).json(message);
+  } catch (err) {
+    console.error("Proxy error:", err);
+    // The SDK throws typed errors with a `status` property matching the
+    // upstream HTTP status (429 rate limit, 529 overloaded, etc). Pass that
+    // through so the frontend's retry logic can react correctly.
+    const status = err && err.status ? err.status : 502;
+    const detail = err && err.message ? err.message : "Upstream request failed. Please try again.";
+    res.status(status).json({ error: { message: detail } });
   }
 });
 
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Server executing securely on port ${PORT}`);
+  console.log("Resume Genius proxy listening on port " + PORT);
 });
