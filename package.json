@@ -1,0 +1,17 @@
+{
+  "name": "resume-genius-proxy",
+  "version": "1.0.0",
+  "description": "Secure backend proxy for the Resume Genius tool - keeps the Anthropic API key server-side and rate-limits public traffic.",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0"
+  }
+}
