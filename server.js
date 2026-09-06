@@ -14,15 +14,15 @@ if (!ANTHROPIC_API_KEY) {
   console.error("Missing ANTHROPIC_API_KEY environment variable. Set it in your Render service settings.");
 }
 
-// Initialize Anthropic Client cleanly
+// Initialize Anthropic Client safely
 const anthropic = new Anthropic({
-  apiKey: ANTHROPIC_API_KEY,
+  apiKey: ANTHROPIC_API_KEY || "dummy_placeholder_key_to_prevent_init_crash",
 });
 
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 
-// Friendly home route so clicking your Render link shows a success message instead of "Cannot GET /"
+// Friendly home route so clicking your Render link shows a success message
 app.get("/", (req, res) => {
   res.status(200).send("Resume Genius API Proxy Server is Online.");
 });
@@ -46,15 +46,31 @@ app.use("/api/", limiter);
 // The Core API Proxy Post Handler
 app.post("/api/analyze", async (req, res) => {
   try {
-    const { messages, tools } = req.body;
+    if (!ANTHROPIC_API_KEY) {
+      return res.status(500).json({ error: "Server is not configured with an API key." });
+    }
 
+    const { messages, tools } = req.body || {};
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: "Request must include a non-empty messages array." });
+    }
+
+    // Filter tools payload if required (ensures security guardrails)
+    let activeTools = tools;
+    if (Array.isArray(tools) && tools.length > 0) {
+      // If filtering is preferred to restrict tools usage, handle it cleanly here:
+      activeTools = tools.filter((t) => t && t.name === "web_search");
+    }
+
+    // Call the official Anthropic SDK safely using our configuration constants
     const response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: MAX_TOKENS_CAP,
       messages: messages,
-      ...(tools && { tools: tools })
+      ...(activeTools && activeTools.length > 0 && { tools: activeTools })
     });
 
+    // Extract text responses out cleanly for the frontend application wrapper
     const text = response.content
       .filter((b) => b.type === "text")
       .map((b) => b.text)
