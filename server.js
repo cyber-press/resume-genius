@@ -8,10 +8,16 @@ const PORT = process.env.PORT || 3000;
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const MODEL = "claude-3-5-sonnet-20241022";
+const MAX_TOKENS_CAP = 1200;
 
 if (!ANTHROPIC_API_KEY) {
-  console.error("Missing ANTHROPIC_API_KEY environment variable. Set it at your Render service settings.");
+  console.error("Missing ANTHROPIC_API_KEY environment variable. Set it in your Render service settings.");
 }
+
+// Initialize Anthropic Client cleanly
+const anthropic = new Anthropic({
+  apiKey: ANTHROPIC_API_KEY,
+});
 
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
@@ -21,6 +27,12 @@ app.get("/", (req, res) => {
   res.status(200).send("Resume Genius API Proxy Server is Online.");
 });
 
+// Health check endpoint
+app.get("/health", (req, res) => {
+  res.json({ ok: true });
+});
+
+// Global Rate Limiter: Allows a couple of full runs plus retries per IP in a 15-minute window
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 60, // Limit each IP to 60 requests per window
@@ -31,52 +43,31 @@ const limiter = rateLimit({
 
 app.use("/api/", limiter);
 
-
-app.get("/health", (req, res) => {
-  res.json({ ok: true });
-});
-
-app.post("/api/messages", async (req, res) => {
+// The Core API Proxy Post Handler
+app.post("/api/analyze", async (req, res) => {
   try {
-    if (!ANTHROPIC_API_KEY) {
-      return res.status(500).json({ error: "Server is not configured with an API key." });
-    }
+    const { messages, tools } = req.body;
 
-    const { messages, tools } = req.body || {};
-    if (!Array.isArray(messages) || messages.length === 0) {
-      return res.status(400).json({ error: "Request must include a non-empty messages array." });
-    }
-
-    const body = {
+    const response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: MAX_TOKENS_CAP,
-      messages,
-    };
-    if (Array.isArray(tools) && tools.length > 0) {
-      // Only allow the web_search tool through the proxy - nothing else.
-      const allowedTools = tools.filter((t) => t && t.name === "web_search");
-      if (allowedTools.length > 0) body.tools = allowedTools;
-    }
-
-    const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify(body),
+      messages: messages,
+      ...(tools && { tools: tools })
     });
 
-    const data = await anthropicRes.json();
-    res.status(anthropicRes.status).json(data);
-  } catch (err) {
-    console.error("Proxy error:", err);
-    res.status(502).json({ error: "Upstream request failed. Please try again." });
+    const text = response.content
+      .filter((b) => b.type === "text")
+      .map((b) => b.text)
+      .join("\n")
+      .trim();
+
+    return res.status(200).json({ text });
+  } catch (error) {
+    console.error('Render Proxy Error:', error);
+    return res.status(500).json({ error: 'Failed to process request with Claude.' });
   }
 });
 
-const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log("Resume Genius proxy listening on port " + PORT);
+  console.log(`Server executing securely on port ${PORT}`);
 });
