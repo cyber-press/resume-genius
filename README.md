@@ -1,31 +1,60 @@
 # Resume Genius
 
-Resume Genius is a static GitHub Pages frontend backed by a rate-limited Express proxy for Anthropic. Resume files are parsed in the browser; extracted text is sent to the proxy only after consent.
+Resume Genius turns resume evidence into marketable service ideas, current market research, source-backed leads, and an editable proposal. The frontend is a compiled React + TypeScript application; Anthropic requests pass through a restricted Express proxy so the API key never reaches the browser.
 
 ## Architecture
 
-- `index.html` — authoritative browser application
-- `config.js` — public backend endpoint configuration
-- `server.js` — private-key API proxy for Render
-- `privacy.html` and `terms.html` — user disclosures
+```text
+src/
+  components/       Typed UI building blocks
+  lib/api.ts        Analysis workflow and proxy client
+  lib/resume.ts     Local PDF, DOCX, and text extraction
+  lib/proposal.ts   Editable proposal generator
+server.js           Render-hosted API proxy
+index.html          Vite entry point
+privacy.html        Privacy disclosure
+terms.html          Terms of use
+```
 
-The browser must never contain, request, or store an Anthropic API key.
+PDF.js and Mammoth are compiled into lazy chunks and only downloaded when their file type is selected. No runtime JSX compiler or UMD framework scripts are used.
 
-## Local setup
+## Local development
 
-1. Install backend dependencies with `npm ci`.
-2. Copy `.env.example` to `.env` and set the values locally. Never commit `.env`.
-3. Set `config.js` to the complete HTTPS proxy endpoint.
-4. Run `npm start` for the backend and serve the static files with a local HTTP server.
+Requirements: Node.js 20.19 or newer.
 
-## Required Render variables
+```bash
+npm ci
+npm run dev
+```
+
+The proxy runs separately:
+
+```bash
+cp .env.example .env
+npm start
+```
+
+Never commit `.env` or expose `ANTHROPIC_API_KEY` to frontend code.
+
+## Commands
+
+```bash
+npm run typecheck   # TypeScript validation
+npm test            # Security and architecture regressions
+npm run build       # Production compile to dist/
+npm run check       # Full release gate
+```
+
+## Render backend
+
+Required environment variables:
 
 ```text
 ANTHROPIC_API_KEY=<secret>
 ALLOWED_ORIGINS=https://cyber-press.github.io
 ```
 
-Render settings:
+Recommended service settings:
 
 ```text
 Runtime: Node
@@ -34,31 +63,20 @@ Start command: npm start
 Health check path: /health
 ```
 
-## GitHub Pages
+## GitHub Pages frontend
 
-The production site is served from the repository's configured Pages source. Before promotion, `config.js` must contain the verified Render endpoint:
+The workflow in `.github/workflows/deploy-pages.yml` runs the complete release gate, uploads `dist/`, and deploys it through GitHub Pages. In **Settings → Pages**, set the source to **GitHub Actions** before merging the compiled-frontend release.
 
-```js
-window.RESUME_GENIUS_CONFIG = Object.freeze({
-  apiEndpoint: "https://your-service.onrender.com/api/messages",
-});
-```
+Vite uses relative asset paths so the same build works at the GitHub Pages repository path and in isolated staging environments.
 
-## Security controls
+## Security and trust controls
 
-- API key remains server-side.
+- The API key remains server-side.
 - CORS is restricted through `ALLOWED_ORIGINS`.
-- Requests are rate-limited and input-size limited.
-- Client-supplied model and tool definitions are not trusted.
+- Proxy requests are rate-limited and size-limited.
+- Client-supplied model and unrestricted tool definitions are rejected.
 - AI response shapes are validated before rendering.
-- Failed live analysis produces an error; the application does not fabricate fallback results.
+- Live research sources are linked for user verification.
+- Failed analysis returns an error; the app does not fabricate fallback results.
 
-## Verification
-
-Run:
-
-```bash
-npm test
-```
-
-Production promotion requires a successful live `/health` check and a complete sample-resume run against the configured proxy.
+Before production promotion, run `npm run check`, verify `/health`, and complete a consented sample-resume analysis against the production proxy.
