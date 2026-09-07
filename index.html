@@ -3,7 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Analyze a resume to identify marketable skills, current opportunities, and a client-ready proposal.">
   <title>Resume Genius</title>
+  <script src="./config.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
@@ -60,13 +62,13 @@ async function extractPdfText(file) {
   await loadScriptOnce(PDF_JS_URL, "pdfjsLib");
   const pdfjsLib = window.pdfjsLib;
   if (!pdfjsLib) throw new Error("PDF reader unavailable");
-  
+
   try {
     pdfjsLib.GlobalWorkerOptions.workerSrc = PDF_WORKER_URL;
   } catch (e) {}
 
   const buf = await file.arrayBuffer();
-  
+
   const parseTask = (async () => {
     const loadingTask = pdfjsLib.getDocument({
       data: new Uint8Array(buf),
@@ -393,25 +395,26 @@ const CSS = `
 }
 .sct-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .sct-copied { font-size: 12.5px; color: var(--teal); }
+.sct-consent { display: flex; gap: 9px; align-items: flex-start; margin-top: 16px; font-size: 12.5px; line-height: 1.5; color: var(--ink-soft); }
+.sct-consent input { margin-top: 3px; accent-color: var(--teal); }
+.sct-consent a, .sct-footer a { color: var(--teal); }
+.sct-footer { margin-top: 24px; text-align: center; font-size: 11.5px; line-height: 1.6; color: var(--ink-soft); }
 `;
 
 const STEPS = ["Resume", "Research", "Best fit", "Proposal"];
-const MODEL = "claude-3-5-sonnet-20241022";
 const MAX_SKILLS_RESEARCHED = 5;
+const MAX_RESUME_CHARS = 75000;
+const API_ENDPOINT = String(window.RESUME_GENIUS_CONFIG?.apiEndpoint || "").trim();
 
-// Dynamic Resume Parser & Market Intelligence Engine
-function parseResumeDynamic(text) {
+// Extract only contact information and evidence used to personalize a proposal.
+// Market rates, demand, rankings, and leads must always come from the live API.
+function parseResumeBasics(text) {
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
-  if (!lines.length) return null;
+  if (!lines.length) return { contact: {}, bullets: [] };
 
-  // 1. Candidate Contact Information Extraction
   let rawName = lines[0].split(/[|•,\t]/)[0].trim();
   if (/@|\d{3}|resume|curriculum|summary|profile/i.test(rawName) || rawName.length > 35) {
-    if (lines && !/@|\d{3}/i.test(lines) && lines.length < 35) {
-      rawName = lines.split(/[|•,\t]/)[0].trim();
-    } else {
-      rawName = "Candidate";
-    }
+    rawName = "Candidate";
   }
 
   const emailMatch = text.match(/[\w.-]+@[\w.-]+\.[a-zA-Z]{2,}/);
@@ -421,9 +424,8 @@ function parseResumeDynamic(text) {
   const phone = phoneMatch ? phoneMatch[0] : "";
 
   const locMatch = text.match(/([A-Za-z\s]{3,20}),\s*([A-Z]{2})/);
-  const location = locMatch ? `${locMatch.trim()}, ${locMatch}` : "United States";
+  const location = locMatch ? `${locMatch[1].trim()}, ${locMatch[2]}` : "";
 
-  // 2. Extract Bullet Points / Accomplishments
   const bullets = [];
   lines.forEach((l) => {
     if (/^[-•*–\d\.]+\s*/.test(l)) {
@@ -432,166 +434,48 @@ function parseResumeDynamic(text) {
     }
   });
 
-  // 3. Extract Real Skills Section line by line
-  let skillItems = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const match = line.match(/^(?:technical\s+)?(?:skills|core\s+competencies|competencies|areas\s+of\s+expertise|proficiencies)(?:\s*[:\-])?\s*(.*)$/i);
-    if (match) {
-      const inline = match;
-      if (inline && inline.length > 2) {
-        skillItems.push(...inline.split(/[,|•;•]+/).map((s) => s.trim()));
-      }
-      for (let j = i + 1; j < Math.min(i + 15, lines.length); j++) {
-        const nextLine = lines[j];
-        if (/^(experience|employment|work history|education|certifications|projects|summary)/i.test(nextLine)) {
-          break;
-        }
-        if (nextLine.length > 0) {
-          skillItems.push(...nextLine.split(/[,|•;•]+/).map((s) => s.trim()));
-        }
-      }
-      break;
-    }
-  }
-
-  // Deduplicate and filter skills
-  const cleanSkills = [];
-  const seen = new Set();
-  skillItems.forEach((s) => {
-    const cleaned = s.replace(/^[-•*–\d\.:]+\s*/, '').trim();
-    const lower = cleaned.toLowerCase();
-    if (cleaned.length >= 2 && cleaned.length <= 40 && !seen.has(lower) && !/^(skills|experience|and|or|etc)$/i.test(lower)) {
-      seen.add(lower);
-      cleanSkills.push(cleaned);
-    }
-  });
-
-  // If no explicit skills header was found, derive top skills from experience bullets
-  if (cleanSkills.length < 3) {
-    bullets.forEach((b) => {
-      const parts = b.split(/[,;]/);
-      if (parts[0] && parts[0].length < 40 && parts[0].split(' ').length <= 5) {
-        const candidate = parts[0].trim();
-        if (!seen.has(candidate.toLowerCase())) {
-          seen.add(candidate.toLowerCase());
-          cleanSkills.push(candidate);
-        }
-      }
-    });
-  }
-
-  const topSkillsList = cleanSkills.slice(0, 4);
-  if (!topSkillsList.length) {
-    topSkillsList.push("Operations & Systems Management", "Client Support & Triage", "Workflow Process Optimization");
-  }
-
-  // Determine domain characteristics
-  const isIT = /active directory|network|tcp|ip|vlan|troubleshoot|software|system|help desk|ticket|cloud|security|itil|comptia/i.test(text);
-  const isHealth = /patient|medical|clinical|health|nurse|doctor|hospital|care supervisor/i.test(text);
-  const isSalesMkt = /marketing|seo|content|sales|lead|revenue|campaign|brand|copywriting/i.test(text);
-
-  let domainRate = "$65–$115/hr ($3,500/mo retainer)";
-  let domainDemand = "High corporate demand across growing small-to-midsize businesses";
-  if (isIT) {
-    domainRate = "$75–$130/hr ($3,850/mo retainer)";
-    domainDemand = "0.8% unemployment in specialized infrastructure & IT service management";
-  } else if (isHealth) {
-    domainRate = "$70–$120/hr ($3,200/mo retainer)";
-    domainDemand = "High demand in outpatient clinics and private healthcare facilities";
-  } else if (isSalesMkt) {
-    domainRate = "$80–$140/hr ($4,000/mo retainer)";
-    domainDemand = "Surging commercial demand for inbound pipeline generation";
-  }
-
-  // Map each skill with real matching bullet point evidence from the resume
-  const skillsWithEvidence = topSkillsList.map((sName, i) => {
-    const tokens = sName.toLowerCase().split(' ').filter((t) => t.length > 2);
-    let matched = bullets.find((b) => tokens.some((tok) => b.toLowerCase().includes(tok)));
-    if (!matched && bullets.length > 0) {
-      matched = bullets[i % bullets.length];
-    }
-    if (!matched) {
-      matched = `Demonstrated competency in ${sName} throughout professional responsibilities.`;
-    }
-    return {
-      id: `s${i}`,
-      name: sName,
-      evidence: matched,
-      category: isIT ? "Information Technology" : isHealth ? "Healthcare Operations" : "Business Operations"
-    };
-  });
-
-  const ranked = skillsWithEvidence.map((s, idx) => ({
-    id: s.id,
-    name: s.name,
-    note: idx === 0
-      ? "Highest immediate freelance income potential; easiest to package into a recurring monthly service."
-      : `High-value support capability backed by verified resume achievement: "${s.evidence.slice(0, 65)}..."`
-  }));
-
-  const top = {
-    rate: domainRate,
-    demand: domainDemand,
-    why: `Businesses frequently lose thousands in downtime and lost productivity when their ${skillsWithEvidence[0].name.toLowerCase()} operations are disorganized. Offering proactive fractional execution delivers quantifiable ROI that decision-makers understand immediately.`,
-    steps: [
-      `Package a structured audit sprint focused on ${skillsWithEvidence[0].name}.`,
-      `Identify 5 regional businesses or organizations in ${location}.`,
-      "Send the tailored, executive proposal below to the decision-maker.",
-      "Close a monthly fractional retainer or fixed-fee stabilization sprint."
-    ]
-  };
-
-  const locCity = location.split(',')[0].trim() || "Regional";
-  let leads = [];
-  if (isIT) {
-    leads = [
-      { id: "l0", name: `${locCity} Commercial Systems & MSP Partners`, info: `Growing regional provider seeking specialized contract support for ${skillsWithEvidence[0].name} and workstation management.`, source: "Regional Business & IT Directory" },
-      { id: "l1", name: `${locCity} Healthcare & Medical Group`, info: `Multi-location clinical network requiring secure, compliant identity and helpdesk support.`, source: "Local Medical Association Network" },
-      { id: "l2", name: `${locCity} Logistics & Distribution Hub`, info: `Operations contractor needing proactive system uptime and network connectivity management.`, source: "Indeed / Chamber of Commerce" }
-    ];
-  } else {
-    leads = [
-      { id: "l0", name: `${locCity} Growth Enterprises`, info: `Fast-scaling company looking to outsource ${skillsWithEvidence[0].name} to an experienced independent specialist.`, source: "Local Business Network" },
-      { id: "l1", name: `${locCity} Professional Services Partnership`, info: `Boutique firm needing operational standardization and process oversight.`, source: "Chamber of Commerce" },
-      { id: "l2", name: `${locCity} Operations Network`, info: `Contractor seeking fractional support to handle workflow backlogs and quality assurance.`, source: "Direct Client Outreach" }
-    ];
-  }
-
-  return {
-    contact: { name: rawName, email, phone, location },
-    skills: skillsWithEvidence,
-    ranking: { list: ranked, top },
-    leads,
-    bullets
-  };
+  return { contact: { name: rawName, email, phone, location }, bullets };
 }
 
-async function callClaude(messages, tools) {
-  const apiKey = (typeof window !== "undefined" && (window.ANTHROPIC_API_KEY || localStorage.getItem("anthropic_api_key"))) || "";
-  if (!apiKey) {
-    throw new Error("No API key configured");
+async function callClaude(messages, tools, retries = 2) {
+  if (!API_ENDPOINT || !/^https:\/\//i.test(API_ENDPOINT)) {
+    throw new Error("The live analysis service has not been configured.");
   }
-  const body = { model: MODEL, max_tokens: 1000, messages };
+  const body = { messages };
   if (tools) body.tools = tools;
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true"
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error("Request failed (" + res.status + ")");
-  const data = await res.json();
-  const text = (data.content || [])
-    .filter((b) => b.type === "text")
-    .map((b) => b.text)
-    .join("\n")
-    .trim();
-  return text;
+  let lastError;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 45000);
+    try {
+      const res = await fetch(API_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail = data?.error?.message || data?.error || "The analysis service returned an error.";
+        const error = new Error(`${detail} (${res.status})`);
+        if ([429, 500, 502, 503, 529].includes(res.status) && attempt < retries) {
+          lastError = error;
+          await new Promise((resolve) => setTimeout(resolve, 800 * Math.pow(2, attempt)));
+          continue;
+        }
+        throw error;
+      }
+      const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+      if (!text) throw new Error("The analysis service returned an empty response.");
+      return text;
+    } catch (error) {
+      lastError = error?.name === "AbortError" ? new Error("The analysis request timed out.") : error;
+      if (attempt >= retries || error?.name === "AbortError") throw lastError;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw lastError;
 }
 
 function parseJsonLoose(text) {
@@ -601,6 +485,28 @@ function parseJsonLoose(text) {
   const end = isArray ? cleaned.lastIndexOf("]") : cleaned.lastIndexOf("}");
   const slice = start >= 0 && end >= 0 ? cleaned.slice(start, end + 1) : cleaned;
   return JSON.parse(slice);
+}
+
+function validateSkills(value) {
+  if (!Array.isArray(value)) throw new Error("The service returned an invalid skills response.");
+  const skills = value.filter((item) => item && typeof item.name === "string" && typeof item.evidence === "string");
+  if (!skills.length) throw new Error("No marketable skills could be identified from this resume.");
+  return skills.slice(0, MAX_SKILLS_RESEARCHED);
+}
+
+function validateRanking(value, skills) {
+  if (!value || !Array.isArray(value.ranked) || !value.ranked.length || !value.top) {
+    throw new Error("The service returned an invalid ranking response.");
+  }
+  const used = new Set();
+  const list = value.ranked.map((item) => {
+    const match = skills.find((skill) => skill.name.toLowerCase() === String(item?.name || "").toLowerCase());
+    if (!match || used.has(match.id)) return null;
+    used.add(match.id);
+    return { id: match.id, name: match.name, note: String(item.note || "") };
+  }).filter(Boolean);
+  if (!list.length) throw new Error("The ranking response did not match the extracted skills.");
+  return { list, top: value.top };
 }
 
 function ResumeGenius() {
@@ -628,6 +534,7 @@ function ResumeGenius() {
   const [proposalError, setProposalError] = useState("");
   const [proposal, setProposal] = useState("");
   const [copied, setCopied] = useState(false);
+  const [consent, setConsent] = useState(false);
 
   function resetAll() {
     setStep(1);
@@ -644,6 +551,7 @@ function ResumeGenius() {
     setProposal("");
     setAnalyzeError("");
     setProposalError("");
+    setConsent(false);
   }
 
   async function handleFile(e) {
@@ -654,6 +562,7 @@ function ResumeGenius() {
     setFileLoading(true);
     const name = file.name.toLowerCase();
     try {
+      if (file.size > 10 * 1024 * 1024) throw new Error("file-too-large");
       if (name.endsWith(".pdf")) {
         const text = await extractPdfText(file);
         if (!text) throw new Error("empty");
@@ -670,7 +579,9 @@ function ResumeGenius() {
         setResumeText(text);
       }
     } catch (err) {
-      if (err && err.message === "legacy-doc") {
+      if (err && err.message === "file-too-large") {
+        setAnalyzeError("That file is larger than 10 MB. Upload a smaller file or paste the resume text.");
+      } else if (err && err.message === "legacy-doc") {
         setAnalyzeError("Old .doc files can't be read in-browser. Save it as .docx or .pdf, or paste the text directly.");
       } else if (err && err.message === "timeout") {
         setAnalyzeError("File reading timed out. You can paste the resume text directly into the box below.");
@@ -689,23 +600,20 @@ function ResumeGenius() {
     setAnalyzePhase("extracting");
 
     try {
-      let hasLive = false;
-      try {
-        const testText = await callClaude([{ role: "user", content: "hi" }]);
-        if (testText) hasLive = true;
-      } catch (e) {
-        hasLive = false;
-      }
-
-      if (hasLive) {
+        if (resumeText.length > MAX_RESUME_CHARS) {
+          throw new Error("This resume is too long. Keep it under 75,000 characters.");
+        }
+        const basics = parseResumeBasics(resumeText);
+        setContactInfo(basics.contact);
+        setParsedBullets(basics.bullets);
         const extractPrompt =
           "Read this resume and identify up to " + MAX_SKILLS_RESEARCHED + " marketable skills this person could sell as a freelancer, " +
           "consultant, or contractor. For each, give a short, client-facing skill name (not a resume buzzword), one sentence of evidence " +
           'pulled from the resume, and a category. Return ONLY a JSON array, no other text, in this exact shape: ' +
           '[{"name": "...", "evidence": "...", "category": "..."}]\n\nRESUME:\n' + resumeText;
         const extractText = await callClaude([{ role: "user", content: extractPrompt }]);
-        const parsedSkills = parseJsonLoose(extractText);
-        const withIds = parsedSkills.slice(0, MAX_SKILLS_RESEARCHED).map((s, i) => ({ id: "s" + i, ...s }));
+        const parsedSkills = validateSkills(parseJsonLoose(extractText));
+        const withIds = parsedSkills.map((s, i) => ({ id: "s" + i, name: s.name.trim(), evidence: s.evidence.trim(), category: String(s.category || "Other") }));
         setSkills(withIds);
 
         setAnalyzePhase("researching");
@@ -718,7 +626,10 @@ function ResumeGenius() {
             s.name + "\". Report in under 150 words: (1) types of businesses hiring for this right now, " +
             "(2) freelance/project rate range in USD, (3) full-time salary range in USD, " +
             "(4) demand trend right now. Be specific with numbers.";
-          const text = await callClaude([{ role: "user", content: researchPrompt }]);
+          const text = await callClaude(
+            [{ role: "user", content: researchPrompt }],
+            [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }]
+          );
           results[s.id] = text || "Market analysis completed.";
         }
         setResearch(results);
@@ -731,53 +642,31 @@ function ResumeGenius() {
           "Rank these skills from most to least valuable for immediate income potential and packaging simplicity. " +
           "Return ONLY JSON: {\"ranked\": [{\"name\": \"...\", \"note\": \"...\"}], \"top\": {\"rate\": \"...\", \"demand\": \"...\", \"why\": \"...\", \"steps\": [\"...\"]}}\n\n" + bundle;
         const rankText = await callClaude([{ role: "user", content: rankPrompt }]);
-        const parsedRank = parseJsonLoose(rankText);
-        const rankedList = parsedRank.ranked.map((r) => {
-          const match = withIds.find((s) => s.name.toLowerCase() === String(r.name).toLowerCase()) || withIds[0];
-          return { id: match.id, name: match.name, note: r.note };
-        });
-        setRanking({ list: rankedList, top: parsedRank.top });
+        const validatedRanking = validateRanking(parseJsonLoose(rankText), withIds);
+        const rankedList = validatedRanking.list;
+        setRanking(validatedRanking);
 
         setAnalyzePhase("leads");
         const topSkillName = rankedList[0].name;
         const leadsPrompt =
-          "Suggest 3 realistic businesses or organization types that need freelance help with \"" + topSkillName + "\". " +
-          "Return ONLY JSON: [{\"name\": \"...\", \"info\": \"...\", \"source\": \"...\"}]";
-        const leadsText = await callClaude([{ role: "user", content: leadsPrompt }]);
+          "Use web search to find up to 4 real, currently active businesses or organizations with evidence that they need freelance or contract help with \"" + topSkillName + "\". " +
+          "Do not invent names. Return fewer or an empty array when evidence is insufficient. " +
+          "Return ONLY JSON: [{\"name\": \"...\", \"info\": \"...\", \"source\": \"a direct public URL\"}]";
+        const leadsText = await callClaude(
+          [{ role: "user", content: leadsPrompt }],
+          [{ type: "web_search_20250305", name: "web_search", max_uses: 4 }]
+        );
         const parsedLeads = parseJsonLoose(leadsText);
-        const leadsWithIds = (Array.isArray(parsedLeads) ? parsedLeads : []).map((l, i) => ({ id: "l" + i, ...l }));
+        const leadsWithIds = (Array.isArray(parsedLeads) ? parsedLeads : [])
+          .filter((lead) => lead && typeof lead.name === "string" && /^https:\/\//i.test(String(lead.source || "")))
+          .slice(0, 4)
+          .map((lead, i) => ({ id: "l" + i, name: lead.name, info: String(lead.info || ""), source: lead.source }));
         setLeads(leadsWithIds);
+        setLeadsNote(leadsWithIds.length ? "Verify each opportunity at its linked source before contacting the organization." : "No verifiable active opportunities were found in this search.");
         setStep(3);
-      } else {
-        await new Promise((r) => setTimeout(r, 450));
-        setAnalyzePhase("researching");
-        setResearchProgress({ current: 1, total: 3, label: "IT Systems & Troubleshooting" });
-        await new Promise((r) => setTimeout(r, 450));
-        setResearchProgress({ current: 2, total: 3, label: "Asset & Logistics Management" });
-        await new Promise((r) => setTimeout(r, 450));
-        setAnalyzePhase("ranking");
-        await new Promise((r) => setTimeout(r, 450));
-        setAnalyzePhase("leads");
-        await new Promise((r) => setTimeout(r, 450));
-
-        const res = parseResumeDynamic(resumeText);
-        setContactInfo(res.contact);
-        setParsedBullets(res.bullets);
-        setSkills(res.skills);
-        setResearch(res.research || {});
-        setRanking(res.ranking);
-        setLeads(res.leads);
-        setStep(3);
-      }
     } catch (err) {
-      const res = parseResumeDynamic(resumeText);
-      setContactInfo(res.contact);
-      setParsedBullets(res.bullets);
-      setSkills(res.skills);
-      setResearch(res.research || {});
-      setRanking(res.ranking);
-      setLeads(res.leads);
-      setStep(3);
+      const reason = err?.message || "Unknown error.";
+      setAnalyzeError("Analysis could not be completed: " + reason + " Please try again.");
     } finally {
       setAnalyzing(false);
       setAnalyzePhase("");
@@ -794,7 +683,7 @@ function ResumeGenius() {
 
       const targetClient = selectedLead ? selectedLead.name : "Prospective Client";
       const targetNeed = selectedLead ? selectedLead.info : "optimizing core workflows and managing operational systems";
-      
+
       const candName = (contactInfo && contactInfo.name && contactInfo.name !== "Candidate") ? contactInfo.name : "Consultant";
       const candEmail = (contactInfo && contactInfo.email) ? contactInfo.email : "[Your Email]";
       const candPhone = (contactInfo && contactInfo.phone) ? contactInfo.phone : "[Your Phone]";
@@ -802,8 +691,8 @@ function ResumeGenius() {
       const candTitle = skill.name ? `${skill.name} Specialist` : "Operations & Technical Specialist";
 
       const bullet1 = (parsedBullets && parsedBullets[0]) ? parsedBullets[0] : `Direct execution and oversight of ${skill.name}.`;
-      const bullet2 = (parsedBullets && parsedBullets) ? parsedBullets : "Standardization of procedures to eliminate recurring bottlenecks.";
-      const bullet3 = (parsedBullets && parsedBullets) ? parsedBullets : "Proactive resolution of urgent operational escalations.";
+      const bullet2 = parsedBullets?.[1] || "Standardization of procedures to eliminate recurring bottlenecks.";
+      const bullet3 = parsedBullets?.[2] || "Proactive resolution of urgent operational escalations.";
 
       const propText =
 `PROPOSAL: FRACTIONAL SUPPORT & WORKFLOW STABILIZATION
@@ -899,13 +788,13 @@ Direct confirmation: ${candEmail} | ${candPhone}`;
           <p>Upload a resume. It finds the sellable skills, researches what entrepreneurs and businesses are actually paying for each one right now, highlights the strongest bet, and drafts the proposal to go land the first client.</p>
         </div>
 
-        <div className="sct-rail">
+        <div className="sct-rail" aria-label="Analysis progress">
           {STEPS.map((label, i) => {
             const n = i + 1;
             const state = n < step ? "done" : n === step ? "active" : "";
             return (
               <div className="sct-step" key={label} style={{ flex: n === STEPS.length ? "0 0 auto" : 1 }}>
-                <div className={"sct-dot " + state}>{n < step ? "\u2713" : n}</div>
+                <div className={"sct-dot " + state} aria-current={n === step ? "step" : undefined}>{n < step ? "\u2713" : n}</div>
                 <div className="sct-label">{label}</div>
                 {n !== STEPS.length && <div className={"sct-connector " + (n < step ? "done" : "")} />}
               </div>
@@ -917,8 +806,10 @@ Direct confirmation: ${candEmail} | ${candPhone}`;
           <div className="sct-card">
             <h2>Start with a resume</h2>
             <p className="sct-sub">Paste the text below, or upload a .pdf, .docx, or .txt file.</p>
-            {analyzeError && <div className="sct-err">{analyzeError}</div>}
+            {analyzeError && <div className="sct-err" role="alert">{analyzeError}</div>}
+            <label htmlFor="resume-text" className="sct-stepslabel">Resume text</label>
             <textarea
+              id="resume-text"
               className="sct-textarea"
               placeholder="Paste resume text here..."
               value={resumeText}
@@ -929,11 +820,15 @@ Direct confirmation: ${candEmail} | ${candPhone}`;
               {fileLoading && <span className="sct-loading"><span className="sct-spin" />Reading {fileName}...</span>}
               {!fileLoading && fileName && resumeText && <span>{fileName} loaded</span>}
             </div>
+            <label className="sct-consent">
+              <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+              <span>I consent to sending this resume to the AI analysis service and confirm I have permission to process its contents. See the <a href="./privacy.html" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.</span>
+            </label>
             <div style={{ marginTop: 16 }}>
               {analyzing ? (
-                <div className="sct-loading"><div className="sct-spin" />{analyzeLoadingText()}</div>
+                <div className="sct-loading" role="status" aria-live="polite"><div className="sct-spin" />{analyzeLoadingText()}</div>
               ) : (
-                <button className="sct-btn" disabled={!resumeText.trim() || fileLoading} onClick={analyzeResume}>
+                <button className="sct-btn" disabled={!resumeText.trim() || fileLoading || !consent} onClick={analyzeResume}>
                   Find my most valuable skill
                 </button>
               )}
@@ -997,14 +892,14 @@ Direct confirmation: ${candEmail} | ${candPhone}`;
                     <div>
                       <div className="sct-leadname">{l.name}</div>
                       <div className="sct-leadinfo">{l.info}</div>
-                      {l.source && <div className="sct-leadsource">Source: {l.source}</div>}
+                      {l.source && <div className="sct-leadsource">Source: <a href={l.source} target="_blank" rel="noopener noreferrer">View evidence</a></div>}
                     </div>
                   </label>
                 ))}
               </div>
             )}
 
-            {proposalError && <div className="sct-err" style={{ marginTop: 16 }}>{proposalError}</div>}
+            {proposalError && <div className="sct-err" role="alert" style={{ marginTop: 16 }}>{proposalError}</div>}
             <div style={{ marginTop: 18 }}>
               {loadingProposal ? (
                 <div className="sct-loading"><div className="sct-spin" />Drafting the proposal...</div>
@@ -1026,7 +921,7 @@ Direct confirmation: ${candEmail} | ${candPhone}`;
               })()}
               {" "}Edit freely before sending.
             </p>
-            <div className="sct-proposal">{proposal}</div>
+            <textarea className="sct-proposal" value={proposal} onChange={(e) => setProposal(e.target.value)} aria-label="Editable proposal draft" style={{ width: "100%", minHeight: 520, resize: "vertical" }} />
             <div className="sct-actions">
               <button className="sct-btn" onClick={copyProposal}>Copy proposal</button>
               {copied && <span className="sct-copied">Copied</span>}
@@ -1034,6 +929,10 @@ Direct confirmation: ${candEmail} | ${candPhone}`;
             </div>
           </div>
         )}
+        <footer className="sct-footer">
+          Resume Genius provides AI-assisted guidance, not guaranteed employment or income results.<br />
+          <a href="./privacy.html">Privacy Policy</a> · <a href="./terms.html">Terms of Use</a>
+        </footer>
       </div>
     </div>
   );

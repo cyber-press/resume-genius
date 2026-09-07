@@ -1,64 +1,64 @@
-# Resume Genius Proxy
+# Resume Genius
 
-A small backend that sits between the Resume Genius tool and Anthropic's API.
-It holds your Anthropic API key server-side (never exposed to the browser)
-and rate-limits requests so the publicly-shared tool can't run up an
-unbounded bill.
+Resume Genius is a static GitHub Pages frontend backed by a rate-limited Express proxy for Anthropic. Resume files are parsed in the browser; extracted text is sent to the proxy only after consent.
 
-## What it does
+## Architecture
 
-- Exposes one endpoint: `POST /api/messages`
-- Forwards the request to `https://api.anthropic.com/v1/messages` with your
-  API key attached server-side
-- Forces the model and a max token cap server-side, regardless of what the
-  frontend sends, so the proxy can't be tricked into requesting a more
-  expensive model or larger response
-- Only allows the `web_search` tool through - no other tools can be invoked
-  via this proxy
-- Rate-limits each IP to 60 requests per 15 minutes (a full Resume Genius
-  run is roughly 10-14 requests, so this allows a couple of full runs plus
-  retries per visitor)
+- `index.html` — authoritative browser application
+- `config.js` — public backend endpoint configuration
+- `server.js` — private-key API proxy for Render
+- `privacy.html` and `terms.html` — user disclosures
 
-## Deploy this on Render
+The browser must never contain, request, or store an Anthropic API key.
 
-1. **Push this folder to a GitHub repository** (public or private - Render
-   can access either once connected to your GitHub account).
+## Local setup
 
-   ```bash
-   cd resume-genius-proxy
-   git init
-   git add .
-   git commit -m "Resume Genius proxy"
-   git branch -M main
-   git remote add origin <your-new-repo-url>
-   git push -u origin main
-   ```
+1. Install backend dependencies with `npm ci`.
+2. Copy `.env.example` to `.env` and set the values locally. Never commit `.env`.
+3. Set `config.js` to the complete HTTPS proxy endpoint.
+4. Run `npm start` for the backend and serve the static files with a local HTTP server.
 
-2. **In the Render dashboard** (or hand the repo URL to Claude to do this
-   step for you): create a new Web Service pointed at that repo, with:
-   - Runtime: Node
-   - Build command: `npm install`
-   - Start command: `npm start`
+## Required Render variables
 
-3. **Set the environment variable** `ANTHROPIC_API_KEY` to your real
-   Anthropic API key. Do this directly in the Render dashboard under your
-   service's **Environment** tab, rather than pasting the key into a chat -
-   Render env vars are encrypted at rest and never appear in your code.
+```text
+ANTHROPIC_API_KEY=<secret>
+ALLOWED_ORIGINS=https://cyber-press.github.io
+```
 
-4. Once deployed, Render gives you a URL like
-   `https://resume-genius-proxy.onrender.com`. Your live endpoint is:
+Render settings:
 
-   ```
-   https://resume-genius-proxy.onrender.com/api/messages
-   ```
+```text
+Runtime: Node
+Build command: npm ci
+Start command: npm start
+Health check path: /health
+```
 
-5. **Update the Resume Genius artifact**: change the `API_ENDPOINT` constant
-   near the top of `resume-genius.jsx` to that URL, then re-publish the
-   artifact.
+## GitHub Pages
 
-## Note on the free plan
+The production site is served from the repository's configured Pages source. Before promotion, `config.js` must contain the verified Render endpoint:
 
-Render's free web service plan spins down after periods of inactivity and
-takes a few seconds to wake back up on the next request. That means a
-client's very first request after idle time may feel slow to start. If that
-matters for your use case, Render's Starter plan keeps it always-on.
+```js
+window.RESUME_GENIUS_CONFIG = Object.freeze({
+  apiEndpoint: "https://your-service.onrender.com/api/messages",
+});
+```
+
+## Security controls
+
+- API key remains server-side.
+- CORS is restricted through `ALLOWED_ORIGINS`.
+- Requests are rate-limited and input-size limited.
+- Client-supplied model and tool definitions are not trusted.
+- AI response shapes are validated before rendering.
+- Failed live analysis produces an error; the application does not fabricate fallback results.
+
+## Verification
+
+Run:
+
+```bash
+npm test
+```
+
+Production promotion requires a successful live `/health` check and a complete sample-resume run against the configured proxy.
