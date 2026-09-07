@@ -23,7 +23,7 @@ test("fabricated fallback engine is removed", () => {
 });
 
 test("frontend requires consent and a configured proxy", () => {
-  assert.match(index, /RESUME_GENIUS_CONFIG/);
+  assert.match(index, /https:\/\/resume-genius-proxy\.onrender\.com\/api\/messages/);
   assert.match(index, /checked=\{consent\}/);
   assert.match(index, /!consent/);
 });
