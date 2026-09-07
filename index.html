@@ -422,7 +422,7 @@ function parseResumeBasics(text) {
   const phoneMatch = text.match(/(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/);
   const phone = phoneMatch ? phoneMatch[0] : "";
 
-  const locMatch = text.match(/([A-Za-z\s]{3,20}),\s*([A-Z]{2})/);
+  const locMatch = text.match(/(?:^|\n)\s*([A-Za-z][A-Za-z .'-]{1,30}),\s*([A-Z]{2})\b/m);
   const location = locMatch ? `${locMatch[1].trim()}, ${locMatch[2]}` : "";
 
   const bullets = [];
