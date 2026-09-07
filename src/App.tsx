@@ -62,7 +62,7 @@ export default function App() {
       <header className="site-header">
         <a className="brand" href="./" aria-label="Resume Genius home"><span className="brand-mark"><Sparkles size={18} /></span><span>Resume <b>Genius</b></span></a>
         <nav className={mobileMenu ? "header-nav open" : "header-nav"} aria-label="Utility navigation">
-          <a href="./privacy.html">Privacy</a><a href="./terms.html">Terms</a><span className="status-pill"><span /> Analysis service online</span>
+          <a href="./privacy.html">Privacy</a><a href="./terms.html">Terms</a><span className="status-pill"><ShieldCheck size={13} /> Secure analysis service</span>
         </nav>
         <button className="menu-button" type="button" aria-label="Toggle menu" onClick={() => setMobileMenu((open) => !open)}>{mobileMenu ? <X /> : <Menu />}</button>
       </header>
