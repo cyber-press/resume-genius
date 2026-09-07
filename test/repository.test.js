@@ -32,6 +32,7 @@ test("backend restricts origins and validates input", () => {
   assert.match(server, /ALLOWED_ORIGINS/);
   assert.match(server, /MAX_INPUT_CHARS/);
   assert.match(server, /web_search_20250305/);
+  assert.match(server, /MAX_TOKENS_CAP = 4096/);
   assert.doesNotMatch(server, /app\.use\(cors\(\)\)/);
 });
 
