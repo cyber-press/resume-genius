@@ -41,3 +41,10 @@ test("embedded frontend JavaScript and JSX parse successfully", () => {
   assert.ok(match, "embedded application script was not found");
   assert.doesNotThrow(() => parser.parse(match[1], { sourceType: "script", plugins: ["jsx"] }));
 });
+
+test("location parsing cannot consume the preceding resume line", () => {
+  const sample = "Jordan Taylor\nSan Antonio, TX\nProfessional Summary";
+  const match = sample.match(/(?:^|\n)\s*([A-Za-z][A-Za-z .'-]{1,30}),\s*([A-Z]{2})\b/m);
+  assert.equal(match[1], "San Antonio");
+  assert.equal(match[2], "TX");
+});
