@@ -67,7 +67,7 @@ Health check path: /health
 
 The workflow in `.github/workflows/deploy-pages.yml` runs the complete release gate, uploads `dist/`, and deploys it through GitHub Pages. In **Settings → Pages**, set the source to **GitHub Actions** before merging the compiled-frontend release.
 
-Vite's base path is `/resume-genius/`; change it in `vite.config.mts` if the repository name or hosting path changes.
+Vite uses relative asset paths so the same build works at the GitHub Pages repository path and in isolated staging environments.
 
 ## Security and trust controls
 
