@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="Analyze a resume to identify marketable skills, current opportunities, and a client-ready proposal.">
   <title>Resume Genius</title>
-  <script src="./config.js?v=20260907-2"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
@@ -404,7 +403,7 @@ const CSS = `
 const STEPS = ["Resume", "Research", "Best fit", "Proposal"];
 const MAX_SKILLS_RESEARCHED = 5;
 const MAX_RESUME_CHARS = 75000;
-const API_ENDPOINT = String(window.RESUME_GENIUS_CONFIG?.apiEndpoint || "").trim();
+const API_ENDPOINT = "https://resume-genius-proxy.onrender.com/api/messages";
 
 // Extract only contact information and evidence used to personalize a proposal.
 // Market rates, demand, rankings, and leads must always come from the live API.
