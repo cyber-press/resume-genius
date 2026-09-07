@@ -14,7 +14,7 @@ app.set("trust proxy", 1);
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const MODEL = "claude-sonnet-5";
-const MAX_TOKENS_CAP = 1200;
+const MAX_TOKENS_CAP = 4096;
 const MAX_INPUT_CHARS = 80000;
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "https://cyber-press.github.io")
   .split(",")
@@ -59,7 +59,7 @@ app.use("/api/", limiter);
 
 app.get("/health", (req, res) => {
   if (!ANTHROPIC_API_KEY) return res.status(503).json({ ok: false, configured: false });
-  res.json({ ok: true, configured: true });
+  res.json({ ok: true, configured: true, model: MODEL, maxTokensCap: MAX_TOKENS_CAP });
 });
 
 app.post("/api/messages", async (req, res) => {
