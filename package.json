@@ -4,15 +4,20 @@
   "description": "Secure Express backend proxy for Anthropic Claude API",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.28.0",
     "cors": "^2.8.5",
     "express": "^4.19.2",
-    "express-rate-limit": "^7.1.5"
+    "express-rate-limit": "^7.1.5",
+    "helmet": "^8.1.0"
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@babel/parser": "^7.29.8"
   }
 }
